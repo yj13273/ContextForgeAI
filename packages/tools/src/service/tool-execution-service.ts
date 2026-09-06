@@ -14,16 +14,22 @@ import {
   CoworkerPermissionError,
 } from "../errors.js";
 
+import type { IdempotencyService } from "./idempotency.js";
+
 export interface ExecuteToolOptions {
   call: ToolCallIntent;
   context: ToolExecutionContext;
   coworker?: AICoworker;
   employee?: HumanEmployee;
   approved?: boolean;
+  idempotencyKey?: string;
 }
 
 export class ToolExecutionService {
-  constructor(private readonly registry: ToolRegistry) {}
+  constructor(
+    private readonly registry: ToolRegistry,
+    private readonly idempotencyService?: IdempotencyService
+  ) {}
 
   async execute(options: ExecuteToolOptions): Promise<ToolResult> {
     const { call, context, coworker, employee, approved } = options;
@@ -100,7 +106,21 @@ export class ToolExecutionService {
       );
     }
 
-    // 6. Execute tool
-    return tool.execute(call, context);
+    // 6. Idempotency Check for Write Operations
+    if (tool.type === "write" && options.idempotencyKey && this.idempotencyService) {
+      const cached = this.idempotencyService.get(options.idempotencyKey);
+      if (cached) {
+        return cached;
+      }
+    }
+
+    // 7. Execute tool
+    const result = await tool.execute(call, context);
+
+    if (tool.type === "write" && options.idempotencyKey && this.idempotencyService) {
+      this.idempotencyService.set(options.idempotencyKey, result);
+    }
+
+    return result;
   }
 }
