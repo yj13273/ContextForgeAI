@@ -374,5 +374,150 @@ describe("ContextForge Core Pipeline", () => {
 
       expect(writeTool.executionCount).toBe(0);
     });
+
+    it("rejects approval if HumanEmployee belongs to a different organization (cross-tenant security)", async () => {
+      const reasoner = new FakeReasoner("write_tool");
+      const orchestrator = new PipelineOrchestrator(
+        contextEngine,
+        reasoner,
+        toolMap,
+        auditSink
+      );
+
+      const task: Task = {
+        id: "task_cross_org_test",
+        title: "Cross-organization test task",
+        description: "Verify tenant isolation in approvals",
+        workflow: "investigate_issue",
+        status: "CREATED",
+        organizationId: "org_acme_corp",
+        createdByHumanId: human.id,
+        assignedToCoworkerId: coworker.id,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      };
+
+      const result = await orchestrator.startTask(task, coworker, human);
+      const approvalId = result.approvalRequest!.id;
+
+      // Employee from a different organization
+      const externalEmployee: HumanEmployee = {
+        id: "human_other_org",
+        email: "external@othercorp.com",
+        name: "External Approver",
+        role: "Engineer",
+        organizationId: "org_other_corp", // mismatch!
+        createdAt: new Date(),
+      };
+
+      await expect(
+        orchestrator.submitApproval({
+          taskId: task.id,
+          approvalId,
+          human: externalEmployee,
+          approved: true,
+        })
+      ).rejects.toThrow(ValidationError);
+
+      expect(writeTool.executionCount).toBe(0);
+      expect(task.status).toBe("AWAITING_APPROVAL");
+    });
+
+    it("rejects approval if approval.taskId does not match the provided taskId", async () => {
+      const reasoner = new FakeReasoner("write_tool");
+      const orchestrator = new PipelineOrchestrator(
+        contextEngine,
+        reasoner,
+        toolMap,
+        auditSink
+      );
+
+      const taskA: Task = {
+        id: "task_A",
+        title: "Task A",
+        description: "First task",
+        workflow: "investigate_issue",
+        status: "CREATED",
+        organizationId: "org_acme_corp",
+        createdByHumanId: human.id,
+        assignedToCoworkerId: coworker.id,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      };
+
+      const taskB: Task = {
+        id: "task_B",
+        title: "Task B",
+        description: "Second task",
+        workflow: "investigate_issue",
+        status: "CREATED",
+        organizationId: "org_acme_corp",
+        createdByHumanId: human.id,
+        assignedToCoworkerId: coworker.id,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      };
+
+      const resultA = await orchestrator.startTask(taskA, coworker, human);
+      await orchestrator.startTask(taskB, coworker, human);
+
+      const approvalIdA = resultA.approvalRequest!.id;
+
+      // Attempt to submit approval for task A against task B
+      await expect(
+        orchestrator.submitApproval({
+          taskId: taskB.id,
+          approvalId: approvalIdA,
+          human,
+          approved: true,
+        })
+      ).rejects.toThrow(ValidationError);
+
+      expect(writeTool.executionCount).toBe(0);
+    });
+
+    it("rejects approval if an invalid HumanEmployee payload is supplied", async () => {
+      const reasoner = new FakeReasoner("write_tool");
+      const orchestrator = new PipelineOrchestrator(
+        contextEngine,
+        reasoner,
+        toolMap,
+        auditSink
+      );
+
+      const task: Task = {
+        id: "task_invalid_human",
+        title: "Task with invalid approver",
+        description: "Check boundary validation",
+        workflow: "investigate_issue",
+        status: "CREATED",
+        organizationId: "org_acme_corp",
+        createdByHumanId: human.id,
+        assignedToCoworkerId: coworker.id,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      };
+
+      const result = await orchestrator.startTask(task, coworker, human);
+      const approvalId = result.approvalRequest!.id;
+
+      const malformedHuman = {
+        id: "",
+        email: "not-an-email",
+        name: "",
+        organizationId: "org_acme_corp",
+      } as unknown as HumanEmployee;
+
+      await expect(
+        orchestrator.submitApproval({
+          taskId: task.id,
+          approvalId,
+          human: malformedHuman,
+          approved: true,
+        })
+      ).rejects.toThrow(ValidationError);
+
+      expect(writeTool.executionCount).toBe(0);
+    });
   });
 });

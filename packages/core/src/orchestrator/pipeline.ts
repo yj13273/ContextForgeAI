@@ -1,4 +1,8 @@
-import type { HumanEmployee, AICoworker } from "../domain/entities.js";
+import {
+  HumanEmployeeSchema,
+  type HumanEmployee,
+  type AICoworker,
+} from "../domain/entities.js";
 import {
   type Task,
   type TaskStatus,
@@ -73,15 +77,29 @@ export class PipelineOrchestrator {
     coworker: AICoworker,
     human: HumanEmployee
   ): Promise<PipelineExecutionResult> {
-    // 1. Validate distinct entity separation and ownership
-    if (human.id === coworker.id) {
+    // 1. Validate HumanEmployee at orchestrator boundary
+    const humanParse = HumanEmployeeSchema.safeParse(human);
+    if (!humanParse.success) {
+      throw new ValidationError(
+        `Invalid HumanEmployee provided to start task: ${humanParse.error.message}`
+      );
+    }
+    const validatedHuman = humanParse.data;
+
+    // 2. Validate distinct entity separation and ownership
+    if (validatedHuman.id === coworker.id) {
       throw new ValidationError(
         "HumanEmployee and AICoworker must be completely separate domain entities with distinct IDs."
       );
     }
-    if (task.createdByHumanId !== human.id) {
+    if (task.createdByHumanId !== validatedHuman.id) {
       throw new ValidationError(
-        `Task creator ID '${task.createdByHumanId}' does not match human employee ID '${human.id}'.`
+        `Task creator ID '${task.createdByHumanId}' does not match human employee ID '${validatedHuman.id}'.`
+      );
+    }
+    if (task.organizationId !== validatedHuman.organizationId) {
+      throw new ValidationError(
+        `Task organization ID '${task.organizationId}' does not match human employee organization ID '${validatedHuman.organizationId}'.`
       );
     }
     if (task.assignedToCoworkerId !== coworker.id) {
@@ -96,7 +114,7 @@ export class PipelineOrchestrator {
     await this.auditSink.record({
       taskId: task.id,
       actorType: "human_employee",
-      actorId: human.id,
+      actorId: validatedHuman.id,
       eventType: "task_initiated",
       payload: {
         taskTitle: task.title,
@@ -331,6 +349,15 @@ export class PipelineOrchestrator {
   }): Promise<PipelineExecutionResult> {
     const { taskId, approvalId, human, approved, decisionNote } = params;
 
+    // 1. Validate HumanEmployee at orchestrator boundary using Zod schema
+    const humanParse = HumanEmployeeSchema.safeParse(human);
+    if (!humanParse.success) {
+      throw new ValidationError(
+        `Invalid HumanEmployee provided for approval: ${humanParse.error.message}`
+      );
+    }
+    const validatedHuman = humanParse.data;
+
     const task = this.tasks.get(taskId);
     if (!task) {
       throw new ValidationError(`Task '${taskId}' not found.`);
@@ -339,6 +366,26 @@ export class PipelineOrchestrator {
     const approval = this.approvals.get(approvalId);
     if (!approval) {
       throw new ValidationError(`Approval request '${approvalId}' not found.`);
+    }
+
+    // 2. Ensure the approval belongs to the task being resolved
+    if (approval.taskId !== task.id) {
+      throw new ValidationError(
+        `Approval request '${approvalId}' belongs to task '${approval.taskId}', not task '${task.id}'.`
+      );
+    }
+
+    if (task.activeApprovalId && task.activeApprovalId !== approval.id) {
+      throw new ValidationError(
+        `Approval request '${approvalId}' is not the active approval for task '${task.id}'.`
+      );
+    }
+
+    // 3. Ensure HumanEmployee from organization B cannot approve task belonging to organization A
+    if (validatedHuman.organizationId !== task.organizationId) {
+      throw new ValidationError(
+        `HumanEmployee from organization '${validatedHuman.organizationId}' cannot approve a task belonging to organization '${task.organizationId}'.`
+      );
     }
 
     if (approval.status !== "pending") {
@@ -353,14 +400,14 @@ export class PipelineOrchestrator {
       );
     }
 
-    // Human cannot approve coworker request if IDs match
-    if (human.id === approval.requestedByCoworkerId) {
+    // 4. Human cannot approve coworker request if IDs match
+    if (validatedHuman.id === approval.requestedByCoworkerId) {
       throw new ValidationError(
         "An AI Coworker cannot approve its own request; approval must come from a separate HumanEmployee."
       );
     }
 
-    approval.reviewedByHumanId = human.id;
+    approval.reviewedByHumanId = validatedHuman.id;
     approval.decisionNote = decisionNote;
     approval.reviewedAt = new Date();
 
@@ -368,13 +415,13 @@ export class PipelineOrchestrator {
       // Rejection: tool must NEVER execute
       approval.status = "rejected";
       task.status = "REJECTED";
-      task.errorMessage = `Write action rejected by human employee ${human.name}: ${decisionNote ?? "No reason provided"}`;
+      task.errorMessage = `Write action rejected by human employee ${validatedHuman.name}: ${decisionNote ?? "No reason provided"}`;
       task.updatedAt = new Date();
 
       await this.auditSink.record({
         taskId: task.id,
         actorType: "human_employee",
-        actorId: human.id,
+        actorId: validatedHuman.id,
         eventType: "approval_rejected",
         payload: {
           approvalId,
@@ -400,7 +447,7 @@ export class PipelineOrchestrator {
     await this.auditSink.record({
       taskId: task.id,
       actorType: "human_employee",
-      actorId: human.id,
+      actorId: validatedHuman.id,
       eventType: "approval_granted",
       payload: {
         approvalId,
@@ -444,7 +491,7 @@ export class PipelineOrchestrator {
     task.resultData = {
       approvedToolCall: approval.toolCall,
       toolResult: toolResult.data,
-      approvedByHumanId: human.id,
+      approvedByHumanId: validatedHuman.id,
       decisionNote,
     };
     task.updatedAt = new Date();
