@@ -19,11 +19,18 @@ export const ToolResultSchema = z.object({
 
 export type ToolResult = z.infer<typeof ToolResultSchema>;
 
+export interface ToolExecutionContext {
+  readonly organizationId: string;
+  readonly taskId: string;
+  readonly employeeId: string;
+  readonly coworkerId: string;
+}
+
 export interface Tool {
   readonly name: string;
   readonly type: ToolType;
   readonly description: string;
-  execute(call: ToolCallIntent): Promise<ToolResult>;
+  execute(call: ToolCallIntent, context?: ToolExecutionContext): Promise<ToolResult>;
 }
 
 export interface PermissionCheckResult {

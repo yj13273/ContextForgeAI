@@ -268,7 +268,12 @@ export class PipelineOrchestrator {
         payload: { toolName: tool.name, toolType: tool.type },
       });
 
-      const toolResult = await tool.execute(reasoning.toolIntent);
+      const toolResult = await tool.execute(reasoning.toolIntent, {
+        organizationId: task.organizationId,
+        taskId: task.id,
+        employeeId: validatedHuman.id,
+        coworkerId: coworker.id,
+      });
 
       await this.auditSink.record({
         taskId: task.id,
@@ -472,7 +477,12 @@ export class PipelineOrchestrator {
     }
 
     // Execute the approved write tool
-    const toolResult = await tool.execute(approval.toolCall);
+    const toolResult = await tool.execute(approval.toolCall, {
+      organizationId: task.organizationId,
+      taskId: task.id,
+      employeeId: validatedHuman.id,
+      coworkerId: approval.requestedByCoworkerId,
+    });
 
     await this.auditSink.record({
       taskId: task.id,
