@@ -5,3 +5,4 @@ export * from "./coworker-repository.js";
 export * from "./task-repository.js";
 export * from "./approval-repository.js";
 export * from "./audit-repository.js";
+export * from "./memory-repository.js";

@@ -1,11 +1,20 @@
-import type { ContextEngine, ContextBundle, ContextArtifact } from "../domain/context.js";
+import type {
+  ContextEngine,
+  ContextBundle,
+  ContextArtifact,
+  Context,
+  BuildContextParams,
+} from "../domain/context.js";
 import type { Task } from "../domain/task.js";
 import type { AICoworker } from "../domain/entities.js";
 
 export class FakeContextEngine implements ContextEngine {
-  constructor(private customArtifacts?: ContextArtifact[]) {}
+  constructor(
+    private customArtifacts?: ContextArtifact[],
+    private customContext?: Partial<Context>
+  ) {}
 
-  async gatherContext(task: Task, coworker: AICoworker): Promise<ContextBundle> {
+  async gatherContext(task: Task, _coworker: AICoworker): Promise<ContextBundle> {
     const defaultArtifacts: ContextArtifact[] = [
       {
         id: `art_gh_${task.id}`,
@@ -38,6 +47,56 @@ export class FakeContextEngine implements ContextEngine {
       taskId: task.id,
       gatheredAt: new Date(),
       artifacts: this.customArtifacts ?? defaultArtifacts,
+    };
+  }
+
+  async buildContext(params: BuildContextParams): Promise<Context> {
+    const defaultContext: Context = {
+      employee: {
+        id: params.employeeId,
+        name: "Test Employee",
+        email: "employee@example.com",
+        role: "Engineer",
+      },
+      organization: {
+        id: params.organizationId || "org_default",
+        name: "Acme Corp",
+        slug: "acme",
+      },
+      role: {
+        name: "Engineer",
+        permissions: ["task:read", "task:execute"],
+      },
+      coworker: {
+        id: params.coworkerId,
+        name: "Test Coworker",
+        persona: "Software Engineer",
+        capabilities: ["github:read", "linear:read"],
+        systemPrompt: "Investigate issues thoroughly.",
+      },
+      memories: [],
+      knowledge: [],
+      conversation: {
+        taskId: params.taskId,
+        steps: [],
+      },
+      task: {
+        id: params.taskId,
+        title: "Investigate issue",
+        description: "Diagnose root cause",
+        workflow: "investigate_issue",
+        status: "IN_PROGRESS",
+      },
+      tools: [],
+      permissions: {
+        allowedToolNames: ["github:get_issue"],
+        requiresApprovalToolNames: [],
+      },
+    };
+
+    return {
+      ...defaultContext,
+      ...this.customContext,
     };
   }
 }
