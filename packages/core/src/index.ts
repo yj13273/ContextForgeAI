@@ -9,6 +9,7 @@ export * from "./domain/reasoner.js";
 export * from "./domain/tools.js";
 export * from "./domain/approval.js";
 export * from "./domain/audit.js";
+export * from "./domain/investigation.js";
 
 // Subsystems
 export * from "./context/index.js";
@@ -18,6 +19,7 @@ export * from "./reasoner/index.js";
 // Orchestrator
 export * from "./orchestrator/pipeline.js";
 export * from "./orchestrator/agent-loop.js";
+export * from "./orchestrator/investigation-workflow.js";
 
 // Fakes & In-Memory Adapters for Testing / Milestone 1
 export * from "./fakes/fake-context-engine.js";

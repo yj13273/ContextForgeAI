@@ -241,4 +241,54 @@ describe("ContextForge Fastify API", () => {
     expect(denyBody.status).toBe("REJECTED");
     expect(writeTool.executionCount).toBe(0);
   });
+
+  it("supports GET /tasks and task convenience approve/reject routes", async () => {
+    const reasoner = new FakeReasoner("write_tool");
+    const orchestrator = new PipelineOrchestrator(
+      contextEngine,
+      reasoner,
+      toolMap,
+      auditSink
+    );
+    app = await buildServer({ orchestrator, auditSink });
+
+    // 1. Create task using issueKey shorthand
+    const createRes = await app.inject({
+      method: "POST",
+      url: "/tasks",
+      payload: {
+        issueKey: "ENG-142",
+      },
+    });
+
+    expect(createRes.statusCode).toBe(201);
+    const createBody = JSON.parse(createRes.body);
+    expect(createBody.task.title).toContain("ENG-142");
+    expect(createBody.status).toBe("AWAITING_APPROVAL");
+
+    const taskId = createBody.task.id;
+
+    // 2. GET /tasks lists tasks
+    const listRes = await app.inject({
+      method: "GET",
+      url: "/tasks",
+    });
+    expect(listRes.statusCode).toBe(200);
+    const listBody = JSON.parse(listRes.body);
+    expect(listBody.tasks.length).toBeGreaterThan(0);
+    expect(listBody.tasks.some((t: any) => t.id === taskId)).toBe(true);
+
+    // 3. Approve via POST /tasks/:id/approve
+    const approveRes = await app.inject({
+      method: "POST",
+      url: `/tasks/${taskId}/approve`,
+      payload: {
+        decisionNote: "Approved via task route.",
+      },
+    });
+
+    expect(approveRes.statusCode).toBe(200);
+    const approveBody = JSON.parse(approveRes.body);
+    expect(approveBody.status).toBe("COMPLETED");
+  });
 });

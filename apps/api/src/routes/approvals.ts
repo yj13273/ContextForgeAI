@@ -3,13 +3,15 @@ import { z } from "zod";
 import type { PipelineOrchestrator } from "@contextforge/core";
 import { type HumanEmployee, HumanEmployeeSchema } from "@contextforge/core";
 
+import { resolveRequestIdentity } from "../auth.js";
+
 export interface ApprovalsPluginOptions {
   orchestrator: PipelineOrchestrator;
 }
 
 const SubmitApprovalBodySchema = z.object({
-  taskId: z.string().min(1),
-  approved: z.boolean(),
+  taskId: z.string().optional(),
+  approved: z.boolean().optional(),
   decisionNote: z.string().optional(),
   humanEmployee: z.object({
     id: z.string().min(1),
@@ -17,7 +19,7 @@ const SubmitApprovalBodySchema = z.object({
     name: z.string().min(1),
     role: z.string().default("Engineer"),
     organizationId: z.string().default("org_default"),
-  }),
+  }).optional(),
 });
 
 export const approvalRoutes: FastifyPluginAsync<ApprovalsPluginOptions> = async (
@@ -46,16 +48,27 @@ export const approvalRoutes: FastifyPluginAsync<ApprovalsPluginOptions> = async 
       });
     }
 
-    const { taskId, approved, decisionNote, humanEmployee } = parseResult.data;
+    const { employee } = resolveRequestIdentity(request);
+    const { taskId, approved = true, decisionNote, humanEmployee } = parseResult.data;
 
-    const parsedHuman: HumanEmployee = HumanEmployeeSchema.parse({
-      ...humanEmployee,
-      createdAt: new Date(),
-    });
+    const parsedHuman: HumanEmployee = humanEmployee
+      ? HumanEmployeeSchema.parse({ ...humanEmployee, createdAt: new Date() })
+      : employee;
+
+    // Resolve taskId from approval if not provided in body
+    let targetTaskId = taskId;
+    if (!targetTaskId) {
+      const allPending = orchestrator.getPendingApprovals();
+      const match = allPending.find((a) => a.id === approvalId);
+      if (!match) {
+        return reply.status(404).send({ error: `Approval '${approvalId}' not found.` });
+      }
+      targetTaskId = match.taskId;
+    }
 
     try {
       const result = await orchestrator.submitApproval({
-        taskId,
+        taskId: targetTaskId,
         approvalId,
         human: parsedHuman,
         approved,
@@ -76,4 +89,77 @@ export const approvalRoutes: FastifyPluginAsync<ApprovalsPluginOptions> = async 
       });
     }
   });
+
+  fastify.post<{ Params: { id: string }; Body: { decisionNote?: string } }>(
+    "/approvals/:id/approve",
+    async (request, reply) => {
+      const { id: approvalId } = request.params;
+      const { employee } = resolveRequestIdentity(request);
+
+      const allPending = orchestrator.getPendingApprovals();
+      const match = allPending.find((a) => a.id === approvalId);
+      if (!match) {
+        return reply.status(404).send({ error: `Approval '${approvalId}' not found.` });
+      }
+
+      try {
+        const result = await orchestrator.submitApproval({
+          taskId: match.taskId,
+          approvalId,
+          human: employee,
+          approved: true,
+          decisionNote: request.body?.decisionNote,
+        });
+
+        return reply.status(200).send({
+          success: true,
+          status: result.status,
+          message: result.message,
+          task: result.task,
+          toolResult: result.toolResult,
+        });
+      } catch (err: any) {
+        return reply.status(400).send({
+          error: err.name || "ApprovalError",
+          message: err.message,
+        });
+      }
+    }
+  );
+
+  fastify.post<{ Params: { id: string }; Body: { decisionNote?: string } }>(
+    "/approvals/:id/reject",
+    async (request, reply) => {
+      const { id: approvalId } = request.params;
+      const { employee } = resolveRequestIdentity(request);
+
+      const allPending = orchestrator.getPendingApprovals();
+      const match = allPending.find((a) => a.id === approvalId);
+      if (!match) {
+        return reply.status(404).send({ error: `Approval '${approvalId}' not found.` });
+      }
+
+      try {
+        const result = await orchestrator.submitApproval({
+          taskId: match.taskId,
+          approvalId,
+          human: employee,
+          approved: false,
+          decisionNote: request.body?.decisionNote,
+        });
+
+        return reply.status(200).send({
+          success: true,
+          status: result.status,
+          message: result.message,
+          task: result.task,
+        });
+      } catch (err: any) {
+        return reply.status(400).send({
+          error: err.name || "ApprovalError",
+          message: err.message,
+        });
+      }
+    }
+  );
 };

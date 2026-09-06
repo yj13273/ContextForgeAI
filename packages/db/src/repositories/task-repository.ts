@@ -1,4 +1,4 @@
-import { eq, and } from "drizzle-orm";
+import { eq, and, desc } from "drizzle-orm";
 import type { ContextForgeDb } from "../client.js";
 import { tasks, type TaskRecord } from "../schema/tasks.js";
 import { taskSteps, type TaskStepRecord } from "../schema/task-steps.js";
@@ -73,6 +73,15 @@ export class TaskRepository {
       .from(tasks)
       .where(and(eq(tasks.id, id), eq(tasks.organizationId, organizationId)));
     return record || null;
+  }
+
+  async listByOrg(organizationId: string, limit = 50): Promise<TaskRecord[]> {
+    return this.db
+      .select()
+      .from(tasks)
+      .where(eq(tasks.organizationId, organizationId))
+      .orderBy(desc(tasks.createdAt))
+      .limit(limit);
   }
 
   async updateStatus(
