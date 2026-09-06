@@ -1,503 +1,310 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
-import { api, type TaskSummary, type TaskDetailResponse } from "../lib/api";
+import React, { useEffect, useState } from "react";
+import Link from "next/link";
+import { api, type TaskSummary } from "../lib/api";
+import { useDemo } from "../lib/demo-context";
+import { StatusBadge } from "../components/StatusBadge";
+import { RiskBadge } from "../components/RiskBadge";
+import {
+  COWORKER_INFO,
+  SUPERVISOR_INFO,
+  ORGANIZATION_INFO,
+  SEEDED_TASKS,
+} from "../lib/mock-data";
 
-export default function WorkspacePage() {
-  const [prompt, setPrompt] = useState("");
-  const [loading, setLoading] = useState(false);
+export default function HomePage() {
+  const demo = useDemo();
   const [tasks, setTasks] = useState<TaskSummary[]>([]);
-  const [activeTaskId, setActiveTaskId] = useState<string | null>(null);
-  const [activeTaskDetail, setActiveTaskDetail] = useState<TaskDetailResponse | null>(null);
-  const [decisionNote, setDecisionNote] = useState("");
-  const [actionLoading, setActionLoading] = useState(false);
-  const [feedbackMessage, setFeedbackMessage] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
 
-  // Initial load: Fetch tasks
   useEffect(() => {
-    loadTasks();
+    async function load() {
+      setLoading(true);
+      try {
+        const list = await api.listTasks(10);
+        setTasks(list);
+      } catch {
+        // Backend optional
+      } finally {
+        setLoading(false);
+      }
+    }
+    load();
   }, []);
 
-  // When activeTaskId changes, fetch details
-  useEffect(() => {
-    if (activeTaskId) {
-      loadTaskDetail(activeTaskId);
-    }
-  }, [activeTaskId]);
+  const isDemoActive = demo.phase !== "IDLE";
+  const showApprovalBanner = demo.isAwaitingApproval || tasks.some((t) => t.status === "AWAITING_APPROVAL");
 
-  async function loadTasks() {
-    const list = await api.listTasks(20);
-    setTasks(list);
-    if (!activeTaskId && list.length > 0) {
-      setActiveTaskId(list[0].id);
-    }
-  }
-
-  async function loadTaskDetail(id: string) {
-    const detail = await api.getTask(id);
-    if (detail) {
-      setActiveTaskDetail(detail);
-    }
-  }
-
-  async function handleStartInvestigation(customPrompt?: string) {
-    const query = customPrompt || prompt;
-    if (!query.trim()) return;
-
-    setLoading(true);
-    setFeedbackMessage(null);
-
-    const issueKeyMatch = query.match(/[A-Z]+-\d+/i);
-    const issueKey = issueKeyMatch ? issueKeyMatch[0].toUpperCase() : undefined;
-
-    const res = await api.createTask({
-      title: query,
-      issueKey,
-      description: `User requested: ${query}`,
-    });
-
-    setLoading(false);
-
-    if (res.success && res.task) {
-      setPrompt("");
-      setFeedbackMessage(`Investigation started for ${res.task.title}`);
-      await loadTasks();
-      setActiveTaskId(res.task.id);
-    } else {
-      setFeedbackMessage(`Error: ${res.error || "Failed to start investigation."}`);
-    }
-  }
-
-  async function handleApprove() {
-    if (!activeTaskId) return;
-    setActionLoading(true);
-    const res = await api.approveTask(activeTaskId, decisionNote || "Approved by Alice");
-    setActionLoading(false);
-
-    if (res.success) {
-      setDecisionNote("");
-      setFeedbackMessage("Write action approved and executed successfully.");
-      await loadTaskDetail(activeTaskId);
-      await loadTasks();
-    } else {
-      setFeedbackMessage(`Approval failed: ${res.error}`);
-    }
-  }
-
-  async function handleReject() {
-    if (!activeTaskId) return;
-    setActionLoading(true);
-    const res = await api.rejectTask(activeTaskId, decisionNote || "Rejected by Alice");
-    setActionLoading(false);
-
-    if (res.success) {
-      setDecisionNote("");
-      setFeedbackMessage("Write action was rejected. Task marked as REJECTED.");
-      await loadTaskDetail(activeTaskId);
-      await loadTasks();
-    } else {
-      setFeedbackMessage(`Rejection failed: ${res.error}`);
-    }
-  }
-
-  const activeTask = activeTaskDetail?.task;
-  const isAwaitingApproval = activeTask?.status === "AWAITING_APPROVAL";
+  const demoStatusString = demo.isAwaitingApproval
+    ? "AWAITING_APPROVAL"
+    : demo.isRejected
+    ? "REJECTED"
+    : demo.isCompleted
+    ? "COMPLETED"
+    : "REASONING";
 
   return (
-    <div style={{ display: "flex", flex: 1, width: "100%", height: "calc(100vh - 65px)" }}>
-      {/* 1. Sidebar: Investigation History */}
-      <aside
-        style={{
-          width: "320px",
-          borderRight: "1px solid #334155",
-          backgroundColor: "#1e293b",
-          display: "flex",
-          flexDirection: "column",
-        }}
-      >
-        <div style={{ padding: "1rem", borderBottom: "1px solid #334155" }}>
-          <h2 style={{ fontSize: "0.9rem", fontWeight: "700", textTransform: "uppercase", letterSpacing: "0.05em", color: "#94a3b8" }}>
-            Recent Investigations
-          </h2>
-        </div>
-
-        <div style={{ flex: 1, overflowY: "auto", padding: "0.75rem" }}>
-          {tasks.length === 0 ? (
-            <div style={{ padding: "1.5rem 0.5rem", textAlign: "center", color: "#64748b", fontSize: "0.85rem" }}>
-              No investigations yet.
+    <div style={{ maxWidth: "860px", margin: "0 auto" }}>
+      {/* 1. DevBot Status Banner */}
+      <div style={{ marginBottom: "28px" }}>
+        <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", flexWrap: "wrap", gap: "16px" }}>
+          <div>
+            <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "4px" }}>
+              <span className="cf-kicker">AI Software Engineering Coworker</span>
+              <span style={{ color: "var(--text-muted)" }}>·</span>
+              <span style={{ fontSize: "11px", color: "var(--text-muted)", fontFamily: "var(--font-mono)" }}>
+                {ORGANIZATION_INFO.name}
+              </span>
             </div>
-          ) : (
-            tasks.map((t) => {
-              const isSelected = t.id === activeTaskId;
-              let statusBg = "#334155";
-              let statusColor = "#f8fafc";
-              if (t.status === "COMPLETED") {
-                statusBg = "#065f46";
-                statusColor = "#34d399";
-              } else if (t.status === "AWAITING_APPROVAL") {
-                statusBg = "#78350f";
-                statusColor = "#fbbf24";
-              } else if (t.status === "REJECTED") {
-                statusBg = "#881337";
-                statusColor = "#fb7185";
-              }
-
-              return (
-                <div
-                  key={t.id}
-                  onClick={() => setActiveTaskId(t.id)}
-                  style={{
-                    padding: "0.75rem",
-                    borderRadius: "6px",
-                    marginBottom: "0.5rem",
-                    cursor: "pointer",
-                    backgroundColor: isSelected ? "#334155" : "transparent",
-                    border: isSelected ? "1px solid #475569" : "1px solid transparent",
-                    transition: "all 0.15s ease",
-                  }}
-                >
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "0.25rem" }}>
-                    <span style={{ fontWeight: "600", fontSize: "0.85rem", color: isSelected ? "#ffffff" : "#f1f5f9" }}>
-                      {t.title}
-                    </span>
-                    <span
-                      style={{
-                        fontSize: "0.65rem",
-                        padding: "0.15rem 0.4rem",
-                        borderRadius: "4px",
-                        backgroundColor: statusBg,
-                        color: statusColor,
-                        fontWeight: "700",
-                      }}
-                    >
-                      {t.status}
-                    </span>
-                  </div>
-                  <div style={{ fontSize: "0.7rem", color: "#94a3b8" }}>
-                    {new Date(t.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
-                  </div>
-                </div>
-              );
-            })
-          )}
-        </div>
-      </aside>
-
-      {/* 2. Main Workspace: Chat Launcher & Active Investigation */}
-      <section style={{ flex: 1, display: "flex", flexDirection: "column", backgroundColor: "#0f172a", overflowY: "auto" }}>
-        {/* Top Launcher & Chat Input */}
-        <div style={{ padding: "1.5rem 2rem", borderBottom: "1px solid #334155", backgroundColor: "#1e293b" }}>
-          <h2 style={{ fontSize: "1.1rem", fontWeight: "700", marginBottom: "0.5rem", color: "#f8fafc" }}>
-            Investigate with AI Coworker
-          </h2>
-          <p style={{ fontSize: "0.85rem", color: "#94a3b8", marginBottom: "1rem" }}>
-            Ask DevBot to investigate an issue, search repositories, inspect commits, and draft a resolution.
-          </p>
-
-          {/* Prompt Input Box */}
-          <div style={{ display: "flex", gap: "0.75rem", marginBottom: "0.75rem" }}>
-            <input
-              type="text"
-              placeholder="e.g. Investigate ENG-142 (session leak in auth service)"
-              value={prompt}
-              onChange={(e) => setPrompt(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && handleStartInvestigation()}
-              style={{
-                flex: 1,
-                padding: "0.75rem 1rem",
-                borderRadius: "8px",
-                backgroundColor: "#0f172a",
-                border: "1px solid #334155",
-                color: "#f8fafc",
-                fontSize: "0.9rem",
-                outline: "none",
-              }}
-            />
-            <button
-              onClick={() => handleStartInvestigation()}
-              disabled={loading}
-              style={{
-                padding: "0.75rem 1.5rem",
-                borderRadius: "8px",
-                backgroundColor: loading ? "#475569" : "#3b82f6",
-                color: "#ffffff",
-                border: "none",
-                fontWeight: "600",
-                fontSize: "0.9rem",
-              }}
-            >
-              {loading ? "Analyzing..." : "Investigate"}
-            </button>
+            <h1 className="cf-title" style={{ fontSize: "24px" }}>
+              {COWORKER_INFO.name}
+            </h1>
+            <div className="cf-subtitle">
+              Supervised by {SUPERVISOR_INFO.name} ·{" "}
+              <span style={{ color: "var(--state-running)" }}>● Active in workspace</span>
+            </div>
           </div>
 
-          {/* Quick Suggestions */}
-          <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
-            <span style={{ fontSize: "0.75rem", color: "#64748b" }}>Quick prompt:</span>
-            <button
-              onClick={() => handleStartInvestigation("Investigate ENG-142")}
-              style={{
-                fontSize: "0.75rem",
-                padding: "0.2rem 0.5rem",
-                borderRadius: "4px",
-                backgroundColor: "#334155",
-                color: "#38bdf8",
-                border: "1px solid #475569",
-              }}
-            >
-              Investigate ENG-142
-            </button>
-            <button
-              onClick={() => handleStartInvestigation("Investigate ENG-205")}
-              style={{
-                fontSize: "0.75rem",
-                padding: "0.2rem 0.5rem",
-                borderRadius: "4px",
-                backgroundColor: "#334155",
-                color: "#38bdf8",
-                border: "1px solid #475569",
-              }}
-            >
-              Investigate ENG-205
-            </button>
+          <Link href="/coworker" className="cf-btn-primary" style={{ padding: "8px 16px", fontSize: "13px" }}>
+            Investigate an Issue →
+          </Link>
+        </div>
+      </div>
+
+      {/* 2. Pending Approval Alert Banner */}
+      {showApprovalBanner && (
+        <div className="cf-alert-approval" style={{ marginBottom: "28px" }}>
+          <div>
+            <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "3px" }}>
+              <span style={{ fontSize: "11px", fontWeight: 700, color: "var(--state-approval)", textTransform: "uppercase", letterSpacing: "0.04em" }}>
+                Action Requires Human Approval
+              </span>
+              <RiskBadge level="MEDIUM" showRequirement={false} />
+            </div>
+            <div style={{ fontSize: "13px", fontWeight: 600, color: "var(--text-primary)" }}>
+              {isDemoActive ? demo.taskTitle : tasks.find((t) => t.status === "AWAITING_APPROVAL")?.title}
+            </div>
+            <div style={{ fontSize: "12px", color: "var(--text-secondary)", marginTop: "2px" }}>
+              DevBot proposed an external write mutation in Linear. Halted at Approval Gate awaiting {SUPERVISOR_INFO.name}.
+            </div>
           </div>
 
-          {feedbackMessage && (
-            <div
-              style={{
-                marginTop: "0.75rem",
-                padding: "0.5rem 0.75rem",
-                borderRadius: "6px",
-                backgroundColor: feedbackMessage.startsWith("Error") ? "#881337" : "#065f46",
-                color: "#f8fafc",
-                fontSize: "0.8rem",
-              }}
-            >
-              {feedbackMessage}
-            </div>
-          )}
+          <Link href="/coworker" className="cf-btn-primary" style={{ backgroundColor: "var(--state-approval)", color: "#090d14", fontWeight: 600 }}>
+            Review & Decide
+          </Link>
+        </div>
+      )}
+
+      {/* 3. CURRENT WORK */}
+      <div style={{ marginBottom: "36px" }}>
+        <div className="cf-kicker" style={{ marginBottom: "10px" }}>
+          Current Work
         </div>
 
-        {/* 3. Active Investigation Detail View */}
-        <div style={{ flex: 1, padding: "2rem", overflowY: "auto" }}>
-          {!activeTask ? (
-            <div style={{ textAlign: "center", padding: "4rem 2rem", color: "#64748b" }}>
-              <h3>No investigation selected</h3>
-              <p style={{ fontSize: "0.85rem", marginTop: "0.5rem" }}>
-                Start a new investigation above or choose one from the sidebar.
-              </p>
+        {isDemoActive ? (
+          <div className="cf-panel">
+            <div className="cf-panel-header">
+              <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                <span className="cf-code" style={{ color: "var(--accent-emphasis)", fontWeight: 600 }}>
+                  {demo.issueKey}
+                </span>
+                <StatusBadge status={demoStatusString} size="sm" />
+                <RiskBadge level={demo.riskLevel} showRequirement={false} />
+              </div>
+              <span className="cf-code" style={{ fontSize: "11px", color: "var(--text-muted)" }}>
+                Phase: {demo.phase}
+              </span>
             </div>
-          ) : (
-            <div style={{ maxWidth: "900px", margin: "0 auto", display: "flex", flexDirection: "column", gap: "1.5rem" }}>
-              {/* Task Header */}
+
+            <div className="cf-panel-body">
+              <h3 style={{ fontSize: "15px", fontWeight: 600, color: "var(--text-primary)", marginBottom: "8px" }}>
+                {demo.taskTitle}
+              </h3>
+
+              {/* Progress Stepper */}
               <div
                 style={{
+                  padding: "10px 12px",
+                  backgroundColor: "var(--bg-canvas)",
+                  border: "1px solid var(--border-subtle)",
+                  borderRadius: "var(--radius-xs)",
                   display: "flex",
-                  alignItems: "center",
-                  justifyContent: "space-between",
-                  paddingBottom: "1rem",
-                  borderBottom: "1px solid #334155",
+                  flexDirection: "column",
+                  gap: "6px",
+                  fontSize: "12px",
                 }}
               >
-                <div>
-                  <h2 style={{ fontSize: "1.3rem", fontWeight: "700", color: "#f8fafc" }}>
-                    {activeTask.title}
-                  </h2>
-                  <p style={{ fontSize: "0.8rem", color: "#94a3b8", marginTop: "0.25rem" }}>
-                    Task ID: <code>{activeTask.id}</code> • Workflow: <code>{activeTask.workflow}</code>
-                  </p>
+                <div style={{ display: "flex", alignItems: "center", gap: "8px", color: "var(--text-secondary)" }}>
+                  <span style={{ color: "var(--state-success)" }}>✓</span>
+                  <span>Linear issue specifications fetched</span>
                 </div>
-                <span
-                  style={{
-                    padding: "0.35rem 0.8rem",
-                    borderRadius: "999px",
-                    fontWeight: "700",
-                    fontSize: "0.8rem",
-                    backgroundColor:
-                      activeTask.status === "COMPLETED"
-                        ? "#065f46"
-                        : activeTask.status === "AWAITING_APPROVAL"
-                        ? "#78350f"
-                        : activeTask.status === "REJECTED"
-                        ? "#881337"
-                        : "#334155",
-                    color:
-                      activeTask.status === "COMPLETED"
-                        ? "#34d399"
-                        : activeTask.status === "AWAITING_APPROVAL"
-                        ? "#fbbf24"
-                        : activeTask.status === "REJECTED"
-                        ? "#fb7185"
-                        : "#94a3b8",
-                  }}
-                >
-                  {activeTask.status}
-                </span>
+                <div style={{ display: "flex", alignItems: "center", gap: "8px", color: "var(--text-secondary)" }}>
+                  <span style={{ color: "var(--state-success)" }}>✓</span>
+                  <span>Organizational memory retrieved (Session Cache Eviction Pattern)</span>
+                </div>
+                <div style={{ display: "flex", alignItems: "center", gap: "8px", color: "var(--text-secondary)" }}>
+                  <span style={{ color: "var(--state-success)" }}>✓</span>
+                  <span>GitHub repository analyzed (src/auth/session.ts)</span>
+                </div>
+                <div style={{ display: "flex", alignItems: "center", gap: "8px", color: "var(--text-primary)", fontWeight: 500 }}>
+                  <span style={{ color: demo.isCompleted ? "var(--state-success)" : "var(--state-running)" }}>
+                    {demo.isCompleted ? "✓" : "●"}
+                  </span>
+                  <span>
+                    {demo.isCompleted
+                      ? "Outcome verified and organizational memory updated"
+                      : demo.isAwaitingApproval
+                      ? "Approval Gate: Linear issue update queued"
+                      : "Executing multi-tool diagnosis"}
+                  </span>
+                </div>
               </div>
+            </div>
 
-              {/* 4. Approval Gate Banner (when awaiting human approval) */}
-              {isAwaitingApproval && (
-                <div
-                  style={{
-                    padding: "1.25rem",
-                    borderRadius: "8px",
-                    backgroundColor: "#451a03",
-                    border: "1px solid #b45309",
-                    display: "flex",
-                    flexDirection: "column",
-                    gap: "0.75rem",
-                  }}
-                >
-                  <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
-                    <span style={{ fontSize: "1.2rem" }}>⚠️</span>
-                    <h4 style={{ fontSize: "1rem", fontWeight: "700", color: "#fef3c7" }}>
-                      Write Action Requires Human Approval
-                    </h4>
-                  </div>
-                  <p style={{ fontSize: "0.85rem", color: "#fed7aa" }}>
-                    The AI Coworker has finished diagnosis and requests permission to execute a write action:
-                    <strong> linear:update_issue</strong>. The action will NOT execute until you approve.
-                  </p>
+            <div className="cf-panel-footer">
+              <span>Supervised by {SUPERVISOR_INFO.name}</span>
+              <Link href="/coworker" className="cf-btn-ghost">
+                Open Workspace Stream →
+              </Link>
+            </div>
+          </div>
+        ) : (
+          <div className="cf-empty-state">
+            <div style={{ fontSize: "13px", fontWeight: 600, color: "var(--text-primary)", marginBottom: "4px" }}>
+              DevBot is idle and ready for assignment
+            </div>
+            <div style={{ fontSize: "12px", color: "var(--text-muted)", marginBottom: "14px" }}>
+              Primary demo target: ENG-142 (Authentication session memory exhaustion)
+            </div>
+            <Link href="/coworker" className="cf-btn-primary">
+              Launch ENG-142 Investigation
+            </Link>
+          </div>
+        )}
+      </div>
 
-                  <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem", marginTop: "0.25rem" }}>
-                    <input
-                      type="text"
-                      placeholder="Optional decision note (e.g. 'Approved, fix verified on staging')"
-                      value={decisionNote}
-                      onChange={(e) => setDecisionNote(e.target.value)}
-                      style={{
-                        padding: "0.5rem 0.75rem",
-                        borderRadius: "6px",
-                        backgroundColor: "#1c1917",
-                        border: "1px solid #78350f",
-                        color: "#f8fafc",
-                        fontSize: "0.85rem",
-                        outline: "none",
-                      }}
-                    />
+      {/* 4. RECENT TASKS */}
+      <div style={{ marginBottom: "36px" }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "10px" }}>
+          <div className="cf-kicker">Recent Tasks</div>
+          <Link href="/tasks" style={{ fontSize: "12px", color: "var(--accent-emphasis)" }}>
+            View all tasks →
+          </Link>
+        </div>
 
-                    <div style={{ display: "flex", gap: "0.75rem" }}>
-                      <button
-                        onClick={handleApprove}
-                        disabled={actionLoading}
-                        style={{
-                          flex: 1,
-                          padding: "0.6rem 1rem",
-                          borderRadius: "6px",
-                          backgroundColor: "#10b981",
-                          color: "#ffffff",
-                          border: "none",
-                          fontWeight: "700",
-                          fontSize: "0.85rem",
-                        }}
-                      >
-                        {actionLoading ? "Processing..." : "✓ Approve Action"}
-                      </button>
-                      <button
-                        onClick={handleReject}
-                        disabled={actionLoading}
-                        style={{
-                          flex: 1,
-                          padding: "0.6rem 1rem",
-                          borderRadius: "6px",
-                          backgroundColor: "#ef4444",
-                          color: "#ffffff",
-                          border: "none",
-                          fontWeight: "700",
-                          fontSize: "0.85rem",
-                        }}
-                      >
-                        {actionLoading ? "Processing..." : "✕ Reject Action"}
-                      </button>
-                    </div>
-                  </div>
-                </div>
+        <div className="cf-panel">
+          <table className="cf-table">
+            <thead>
+              <tr>
+                <th className="cf-th" style={{ width: "90px" }}>Issue</th>
+                <th className="cf-th">Title</th>
+                <th className="cf-th" style={{ width: "130px" }}>Status</th>
+                <th className="cf-th" style={{ width: "80px", textAlign: "right" }}>Date</th>
+              </tr>
+            </thead>
+            <tbody>
+              {isDemoActive && (
+                <tr className="cf-tr" style={{ cursor: "pointer" }}>
+                  <td className="cf-td">
+                    <Link href="/coworker" className="cf-code" style={{ color: "var(--accent-emphasis)", fontWeight: 600 }}>
+                      {demo.issueKey}
+                    </Link>
+                  </td>
+                  <td className="cf-td">
+                    <Link href="/coworker" style={{ color: "var(--text-primary)", fontWeight: 500 }}>
+                      Authentication session memory exhaustion
+                    </Link>
+                  </td>
+                  <td className="cf-td">
+                    <StatusBadge status={demoStatusString} size="sm" />
+                  </td>
+                  <td className="cf-td" style={{ textAlign: "right", color: "var(--text-muted)", fontSize: "11px" }}>
+                    Just now
+                  </td>
+                </tr>
               )}
 
-              {/* 5. Findings & Evidence Section */}
-              <div
-                style={{
-                  padding: "1.25rem",
-                  borderRadius: "8px",
-                  backgroundColor: "#1e293b",
-                  border: "1px solid #334155",
-                }}
-              >
-                <h3 style={{ fontSize: "0.95rem", fontWeight: "700", color: "#f8fafc", marginBottom: "0.75rem" }}>
-                  Investigation Findings & Evidence
-                </h3>
+              {SEEDED_TASKS.slice(1, 4).map((task) => (
+                <tr key={task.id} className="cf-tr" style={{ cursor: "pointer" }}>
+                  <td className="cf-td">
+                    <Link href={`/coworker?taskId=${task.id}`} className="cf-code" style={{ color: "var(--text-secondary)" }}>
+                      {task.issueKey}
+                    </Link>
+                  </td>
+                  <td className="cf-td">
+                    <Link href={`/coworker?taskId=${task.id}`} style={{ color: "var(--text-primary)" }}>
+                      {task.title.replace(/^[A-Z]+-\d+\s*[:-]?\s*/, "")}
+                    </Link>
+                  </td>
+                  <td className="cf-td">
+                    <StatusBadge status={task.status} size="sm" />
+                  </td>
+                  <td className="cf-td" style={{ textAlign: "right", color: "var(--text-muted)", fontSize: "11px" }}>
+                    {new Date(task.createdAt).toLocaleDateString()}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
 
-                {activeTask.resultSummary ? (
-                  <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem" }}>
-                    <div style={{ padding: "0.75rem", borderRadius: "6px", backgroundColor: "#0f172a" }}>
-                      <div style={{ fontSize: "0.75rem", color: "#94a3b8", fontWeight: "600" }}>Summary</div>
-                      <div style={{ fontSize: "0.9rem", color: "#f8fafc", marginTop: "0.25rem" }}>
-                        {activeTask.resultSummary}
-                      </div>
-                    </div>
+      {/* 5. RECENT ORGANIZATIONAL LEARNING & MEMORY */}
+      <div>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "10px" }}>
+          <div className="cf-kicker">Recent Organizational Learning</div>
+          <Link href="/memory" style={{ fontSize: "12px", color: "var(--accent-emphasis)" }}>
+            Browse memory ({demo.memories.length}) →
+          </Link>
+        </div>
 
-                    {activeTask.resultData && (
-                      <div style={{ padding: "0.75rem", borderRadius: "6px", backgroundColor: "#0f172a" }}>
-                        <div style={{ fontSize: "0.75rem", color: "#94a3b8", fontWeight: "600" }}>Result Details</div>
-                        <pre style={{ fontSize: "0.75rem", color: "#38bdf8", marginTop: "0.25rem", overflowX: "auto" }}>
-                          {JSON.stringify(activeTask.resultData, null, 2)}
-                        </pre>
-                      </div>
-                    )}
-                  </div>
-                ) : (
-                  <p style={{ fontSize: "0.85rem", color: "#94a3b8" }}>
-                    {activeTask.description || "Investigation in progress. Evidence is being gathered."}
-                  </p>
-                )}
-              </div>
-
-              {/* 6. Execution Progress Timeline */}
-              <div
-                style={{
-                  padding: "1.25rem",
-                  borderRadius: "8px",
-                  backgroundColor: "#1e293b",
-                  border: "1px solid #334155",
-                }}
-              >
-                <h3 style={{ fontSize: "0.95rem", fontWeight: "700", color: "#f8fafc", marginBottom: "0.75rem" }}>
-                  Task Execution Activity & Audit Steps
-                </h3>
-
-                <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
-                  {activeTaskDetail.auditEvents.length === 0 ? (
-                    <div style={{ fontSize: "0.8rem", color: "#64748b" }}>No audit steps recorded yet.</div>
-                  ) : (
-                    activeTaskDetail.auditEvents.map((event, idx) => (
-                      <div
-                        key={event.id || idx}
-                        style={{
-                          display: "flex",
-                          alignItems: "center",
-                          justifyContent: "space-between",
-                          padding: "0.5rem 0.75rem",
-                          borderRadius: "6px",
-                          backgroundColor: "#0f172a",
-                          fontSize: "0.8rem",
-                        }}
-                      >
-                        <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
-                          <span style={{ color: "#38bdf8", fontWeight: "700" }}>#{idx + 1}</span>
-                          <span style={{ color: "#f8fafc" }}>{event.eventType}</span>
-                          <span style={{ fontSize: "0.7rem", color: "#64748b" }}>({event.actorType})</span>
-                        </div>
-                        <div style={{ fontSize: "0.7rem", color: "#94a3b8" }}>
-                          {new Date(event.timestamp).toLocaleTimeString()}
-                        </div>
-                      </div>
-                    ))
-                  )}
+        <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+          {demo.memories.slice(0, 2).map((mem) => (
+            <div
+              key={mem.id}
+              style={{
+                padding: "12px 14px",
+                backgroundColor: "var(--bg-surface)",
+                border: "1px solid var(--border-subtle)",
+                borderRadius: "var(--radius-sm)",
+                display: "flex",
+                alignItems: "flex-start",
+                justifyContent: "space-between",
+                gap: "14px",
+              }}
+            >
+              <div>
+                <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "3px" }}>
+                  <span
+                    className="cf-code"
+                    style={{
+                      fontSize: "10px",
+                      color: "var(--state-success)",
+                      backgroundColor: "var(--state-success-bg)",
+                      padding: "1px 5px",
+                      borderRadius: "2px",
+                      fontWeight: 600,
+                    }}
+                  >
+                    {mem.type.toUpperCase()}
+                  </span>
+                  <span style={{ fontSize: "13px", fontWeight: 600, color: "var(--text-primary)" }}>
+                    {mem.title}
+                  </span>
+                </div>
+                <div style={{ fontSize: "12px", color: "var(--text-secondary)", lineHeight: 1.45 }}>
+                  {mem.content}
                 </div>
               </div>
+
+              <span className="cf-code" style={{ fontSize: "11px", color: "var(--text-muted)", flexShrink: 0 }}>
+                {mem.date}
+              </span>
             </div>
-          )}
+          ))}
         </div>
-      </section>
+      </div>
     </div>
   );
 }
